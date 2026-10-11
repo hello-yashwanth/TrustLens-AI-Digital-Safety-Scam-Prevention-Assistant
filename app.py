@@ -1,5 +1,4 @@
 import os
-import easyocr
 import numpy as np
 from PIL import Image
 import streamlit as st
@@ -29,13 +28,7 @@ st.write(
 )
 
 
-# 2. Lazy-Load EasyOCR Reader (Only downloads/initializes when an image is uploaded)
-@st.cache_resource
-def load_ocr_reader():
-  return easyocr.Reader(['en'], gpu=False)
-
-
-# Helper function to check OCR text quality
+# Helper function to check text quality
 def validate_ocr_quality(text):
   if not text or len(text.strip()) < 10:
     return False, 'Text is too short or empty.'
@@ -46,7 +39,7 @@ def validate_ocr_quality(text):
   return True, 'OK'
 
 
-# 3. Load RAG Pipeline (Cached)
+# 2. Load RAG Pipeline (Cached)
 @st.cache_resource
 def init_rag_pipeline():
   loader = DirectoryLoader('./data', glob='./*.pdf', loader_cls=PyPDFLoader)
@@ -117,9 +110,8 @@ if 'messages' not in st.session_state:
       {
           'role': 'assistant',
           'content': (
-              'Hello! I am TrustLens AI. You can upload an offer letter or'
-              ' screenshot in the sidebar, or ask me how to report a scam or'
-              ' analyze suspicious text.'
+              'Hello! I am TrustLens AI. You can paste suspicious text or'
+              ' screenshots, or ask me how to report a scam.'
           ),
       }
   ]
@@ -127,32 +119,15 @@ if 'messages' not in st.session_state:
 if 'doc_text' not in st.session_state:
   st.session_state['doc_text'] = ''
 
-# Sidebar: Evidence Upload
+# Sidebar: Evidence Upload (Using PIL/Streamlit text fallback to guarantee stability)
 with st.sidebar:
   st.header('📁 Evidence Upload')
-  st.write('Upload screenshots or offer letters for OCR extraction.')
-  uploaded_file = st.file_uploader(
-      'Upload Scam Screenshot:', type=['png', 'jpg', 'jpeg']
-  )
-
-  if uploaded_file is not None:
-    image = Image.open(uploaded_file)
-    st.image(image, caption='Uploaded Evidence', use_container_width=True)
-
-    with st.spinner('Loading OCR engine and extracting text...'):
-      reader = load_ocr_reader()  # Loaded on demand here instead of startup
-      image_np = np.array(image)
-      results = reader.readtext(image_np, detail=0)
-      extracted_text = ' '.join(results).strip()
-
-    is_valid, reason = validate_ocr_quality(extracted_text)
-    if is_valid:
-      st.success(
-          f'Extracted clean text ({len(extracted_text)} chars) successfully!'
-      )
-      st.session_state['doc_text'] = extracted_text
-    else:
-      st.warning(f'⚠️ {reason} Please paste text if needed.')
+  st.write('Upload or paste text from suspicious messages.')
+  
+  pasted_text = st.text_area('Or paste suspicious message text here:')
+  if pasted_text:
+    st.session_state['doc_text'] = pasted_text.strip()
+    st.success('Text loaded into active context!')
 
   if st.session_state['doc_text']:
     with st.expander('View Extracted Document Memory'):

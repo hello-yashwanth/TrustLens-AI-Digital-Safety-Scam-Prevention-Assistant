@@ -1,12 +1,11 @@
 streamlit
-torch
-numpy
+pytesseract
 pillow
+pypdf
 langchain-classic
 langchain-community
 langchain-core
 langchain-groq
 langchain-huggingface
 faiss-cpu
-pypdf
 sentence-transformers

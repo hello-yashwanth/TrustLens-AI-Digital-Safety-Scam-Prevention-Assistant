@@ -1,9 +1,9 @@
 import os
 from PIL import Image
+import pytesseract
 import streamlit as st
 from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader
 from langchain_community.vectorstores import FAISS
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -50,7 +50,7 @@ if 'messages' not in st.session_state:
 if 'extracted_document_text' not in st.session_state:
   st.session_state['extracted_document_text'] = ''
 
-# Sidebar: File & Image Uploader
+# Sidebar: File & Image Uploader with Backend OCR Scanning
 with st.sidebar:
   st.header('📁 Evidence Upload')
   uploaded_file = st.file_uploader(
@@ -64,41 +64,41 @@ with st.sidebar:
       reader = pypdf.PdfReader(uploaded_file)
       pdf_text = ''.join([page.extract_text() or '' for page in reader.pages])
       st.session_state['extracted_document_text'] = pdf_text.strip()
-      st.success('PDF text loaded successfully!')
+      st.success('PDF text extracted successfully!')
     else:
       image = Image.open(uploaded_file)
       st.image(
           image, caption='Active Uploaded Evidence Image', use_container_width=True
       )
-      # Automatically populate context so the AI knows an official letter has been uploaded
-      st.session_state['extracted_document_text'] = (
-          f'[Active Uploaded Document File: {uploaded_file.name}]\n'
-          'The user has uploaded a scanned corporate employment offer letter /'
-          ' appointment letter (such as DP World Dubai, Wipro, or Indigo).'
-          ' Please examine the document details (company name, employee'
-          ' terms, issue dates, and any potential visa/security/training fee'
-          ' requirements) and provide a definitive risk assessment verdict'
-          ' (SCAM/Fake or Genuine).'
-      )
-      st.success(
-          'Image successfully registered in active AI document memory!'
-      )
+
+      # BACKEND OCR SCANNING
+      with st.spinner('Scanning image text in backend...'):
+        try:
+          scanned_text = pytesseract.image_to_string(image).strip()
+          if scanned_text and len(scanned_text) > 5:
+            st.session_state['extracted_document_text'] = scanned_text
+            st.success(
+                f'Successfully scanned {len(scanned_text)} characters from'
+                ' image!'
+            )
+          else:
+            st.warning(
+                'Image scanned, but very little text was detected. Please add'
+                ' details below.'
+            )
+        except Exception as e:
+          st.error(f'OCR Scan Error: {str(e)}')
   else:
     st.session_state['extracted_document_text'] = ''
 
-  # Backup text area for extra details if needed
+  # Editable text area to review or supplement scanned text
   manual_text = st.text_area(
-      'Additional Notes or Text:',
-      value=(
-          st.session_state['extracted_document_text']
-          if not st.session_state['extracted_document_text'].startswith('[')
-          else ''
-      ),
-      height=100,
-      placeholder='Add any extra details or paste text here...',
+      'Scanned / Active Document Text:',
+      value=st.session_state['extracted_document_text'],
+      height=140,
   )
-  if manual_text and not manual_text.startswith('['):
-    st.session_state['extracted_document_text'] += f'\nNotes: {manual_text}'
+  if manual_text != st.session_state['extracted_document_text']:
+    st.session_state['extracted_document_text'] = manual_text
 
 # Display Chat History
 for message in st.session_state['messages']:
@@ -121,19 +121,22 @@ if prompt_input := st.chat_input(
           'You are TrustLens AI, an expert cybersecurity and digital safety'
           ' assistant. Your goal is to help users spot scams, phishing, and'
           ' fake job offers.\n'
-          'When document context is provided, analyze it thoroughly. Identify'
-          ' the company name (such as DP World, Wipro, or Indigo), check for'
-          ' scam warning signs (such as requests for upfront security'
+          'When document text context is provided, analyze it thoroughly. Identify'
+          ' the exact company name (such as DP World, Wipro, or Indigo), check'
+          ' for scam warning signs (such as requests for upfront security'
           ' deposits, visa processing fees, training charges, or unofficial'
           ' contact domains), and give a clear definitive verdict of **SCAM (Fake)**'
           ' or **Genuine** with clear bullet points explaining your'
-          ' reasoning.'
+          ' reasoning.\n'
+          'If the user asks what to do if scammed, provide structured action'
+          ' steps, reference the official cybercrime portal'
+          ' (https://cybercrime.gov.in/), and helpline 1930.'
       )
 
       doc_context = st.session_state.get('extracted_document_text', '')
       full_input = (
           f'System Guidelines: {system_prompt}\n\n'
-          f'Active Document Context / Uploaded Details:\n{doc_context}\n\n'
+          f'Scanned Document Text Context:\n{doc_context}\n\n'
           f'User Question: {prompt_input}'
       )
 

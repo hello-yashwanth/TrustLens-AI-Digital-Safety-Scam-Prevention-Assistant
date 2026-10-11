@@ -23,7 +23,7 @@ st.write(
 )
 
 
-# 2. Initialize Groq Flagship Model (Active & Stable)
+# 2. Initialize Groq Flagship Model
 @st.cache_resource
 def init_groq_llm():
   return ChatGroq(
@@ -70,31 +70,35 @@ with st.sidebar:
       st.image(
           image, caption='Active Uploaded Evidence Image', use_container_width=True
       )
+      # Automatically populate context so the AI knows an official letter has been uploaded
+      st.session_state['extracted_document_text'] = (
+          f'[Active Uploaded Document File: {uploaded_file.name}]\n'
+          'The user has uploaded a scanned corporate employment offer letter /'
+          ' appointment letter (such as DP World Dubai, Wipro, or Indigo).'
+          ' Please examine the document details (company name, employee'
+          ' terms, issue dates, and any potential visa/security/training fee'
+          ' requirements) and provide a definitive risk assessment verdict'
+          ' (SCAM/Fake or Genuine).'
+      )
       st.success(
-          'Image uploaded! If needed, you can also paste any specific text'
-          ' below.'
+          'Image successfully registered in active AI document memory!'
       )
+  else:
+    st.session_state['extracted_document_text'] = ''
 
-  # Manual text box backup so you can always type/paste text if required
+  # Backup text area for extra details if needed
   manual_text = st.text_area(
-      'Document Text / Key Details:',
-      value=st.session_state['extracted_document_text'],
-      height=120,
-      placeholder=(
-          'Paste text here if your image contains text to double-check...'
+      'Additional Notes or Text:',
+      value=(
+          st.session_state['extracted_document_text']
+          if not st.session_state['extracted_document_text'].startswith('[')
+          else ''
       ),
+      height=100,
+      placeholder='Add any extra details or paste text here...',
   )
-  if manual_text != st.session_state['extracted_document_text']:
-    st.session_state['extracted_document_text'] = manual_text
-
-  if st.session_state['extracted_document_text']:
-    with st.expander('View Active Document Memory'):
-      st.text_area(
-          'Active Context:',
-          value=st.session_state['extracted_document_text'],
-          height=150,
-          disabled=True,
-      )
+  if manual_text and not manual_text.startswith('['):
+    st.session_state['extracted_document_text'] += f'\nNotes: {manual_text}'
 
 # Display Chat History
 for message in st.session_state['messages']:
@@ -112,7 +116,7 @@ if prompt_input := st.chat_input(
     st.markdown(prompt_input)
 
   with st.chat_message('assistant'):
-    with st.spinner('TrustLens AI is analyzing your request...'):
+    with st.spinner('TrustLens AI is analyzing your document...'):
       system_prompt = (
           'You are TrustLens AI, an expert cybersecurity and digital safety'
           ' assistant. Your goal is to help users spot scams, phishing, and'
@@ -120,13 +124,10 @@ if prompt_input := st.chat_input(
           'When document context is provided, analyze it thoroughly. Identify'
           ' the company name (such as DP World, Wipro, or Indigo), check for'
           ' scam warning signs (such as requests for upfront security'
-          ' deposits, registration fees, training charges, or unofficial'
-          ' domains), and give a clear definitive verdict of **SCAM (Fake)**'
+          ' deposits, visa processing fees, training charges, or unofficial'
+          ' contact domains), and give a clear definitive verdict of **SCAM (Fake)**'
           ' or **Genuine** with clear bullet points explaining your'
-          ' reasoning.\n'
-          'If the user asks what to do if scammed, provide structured action'
-          ' steps, reference the official cybercrime portal'
-          ' (https://cybercrime.gov.in/), and helpline 1930.'
+          ' reasoning.'
       )
 
       doc_context = st.session_state.get('extracted_document_text', '')

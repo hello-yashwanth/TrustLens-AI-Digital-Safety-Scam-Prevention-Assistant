@@ -28,17 +28,6 @@ st.write(
 )
 
 
-# Helper function to check text quality
-def validate_ocr_quality(text):
-  if not text or len(text.strip()) < 10:
-    return False, 'Text is too short or empty.'
-  valid_chars = sum(c.isalnum() or c.isspace() for c in text)
-  quality_ratio = valid_chars / len(text)
-  if quality_ratio < 0.6:
-    return False, 'Too many garbled or unreadable characters detected.'
-  return True, 'OK'
-
-
 # 2. Load RAG Pipeline (Cached)
 @st.cache_resource
 def init_rag_pipeline():
@@ -110,8 +99,8 @@ if 'messages' not in st.session_state:
       {
           'role': 'assistant',
           'content': (
-              'Hello! I am TrustLens AI. You can paste suspicious text or'
-              ' screenshots, or ask me how to report a scam.'
+              'Hello! I am TrustLens AI. You can upload an image or document'
+              ' in the sidebar, or ask me how to report a scam.'
           ),
       }
   ]
@@ -119,20 +108,48 @@ if 'messages' not in st.session_state:
 if 'doc_text' not in st.session_state:
   st.session_state['doc_text'] = ''
 
-# Sidebar: Evidence Upload (Using PIL/Streamlit text fallback to guarantee stability)
+# Sidebar: File & Image Uploader
 with st.sidebar:
   st.header('📁 Evidence Upload')
-  st.write('Upload or paste text from suspicious messages.')
-  
-  pasted_text = st.text_area('Or paste suspicious message text here:')
-  if pasted_text:
-    st.session_state['doc_text'] = pasted_text.strip()
-    st.success('Text loaded into active context!')
+  st.write('Upload screenshots, PDFs, or paste text to analyze.')
+
+  uploaded_file = st.file_uploader(
+      'Upload Image or Document:', type=['png', 'jpg', 'jpeg', 'pdf']
+  )
+
+  if uploaded_file is not None:
+    if uploaded_file.type == 'application/pdf':
+      # Extract text from uploaded PDF
+      import pypdf
+
+      reader = pypdf.PdfReader(uploaded_file)
+      pdf_text = ''
+      for page in reader.pages:
+        pdf_text += page.extract_text() or ''
+      st.session_state['doc_text'] = pdf_text.strip()
+      st.success('PDF uploaded and text extracted successfully!')
+    else:
+      # Display image preview
+      image = Image.open(uploaded_file)
+      st.image(image, caption='Uploaded Evidence', use_container_width=True)
+      st.info(
+          'Image uploaded! Please type out or paste the text content from the'
+          ' screenshot below so the AI can analyze it.'
+      )
+
+  # Manual text input / paste backup
+  manual_input = st.text_area(
+      'Paste or add context text:',
+      value=st.session_state['doc_text'],
+      height=120,
+  )
+  if manual_input != st.session_state['doc_text']:
+    st.session_state['doc_text'] = manual_input
 
   if st.session_state['doc_text']:
-    with st.expander('View Extracted Document Memory'):
+    with st.expander('View Active Document Memory'):
       st.text_area(
-          'Active Context:',
+          'Context:',
           value=st.session_state['doc_text'],
           height=150,
           disabled=True,

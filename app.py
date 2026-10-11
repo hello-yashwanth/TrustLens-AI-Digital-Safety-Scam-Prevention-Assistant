@@ -1,6 +1,5 @@
 import os
 from PIL import Image
-import pytesseract
 import streamlit as st
 from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader
 from langchain_community.vectorstores import FAISS
@@ -41,8 +40,9 @@ if 'messages' not in st.session_state:
       {
           'role': 'assistant',
           'content': (
-              'Hello! I am TrustLens AI. Upload your offer letter screenshot or'
-              ' PDF in the sidebar, and ask me if it is real or fake!'
+              'Hello! I am TrustLens AI. Upload your PDF offer letter or paste'
+              ' message details in the sidebar to check if it is real or'
+              ' fake!'
           ),
       }
   ]
@@ -50,11 +50,11 @@ if 'messages' not in st.session_state:
 if 'extracted_document_text' not in st.session_state:
   st.session_state['extracted_document_text'] = ''
 
-# Sidebar: File & Image Uploader with Backend OCR Scanning
+# Sidebar: File Uploader & Context Manager
 with st.sidebar:
   st.header('📁 Evidence Upload')
   uploaded_file = st.file_uploader(
-      'Upload Offer Letter or Screenshot:', type=['png', 'jpg', 'jpeg', 'pdf']
+      'Upload Offer Letter (PDF) or Image:', type=['png', 'jpg', 'jpeg', 'pdf']
   )
 
   if uploaded_file is not None:
@@ -67,35 +67,21 @@ with st.sidebar:
       st.success('PDF text extracted successfully!')
     else:
       image = Image.open(uploaded_file)
-      st.image(
-          image, caption='Active Uploaded Evidence Image', use_container_width=True
+      st.image(image, caption='Uploaded Evidence', use_container_width=True)
+      st.info(
+          'Image uploaded! Please paste the key details (company name, fee'
+          ' requirements) into the box below.'
       )
-
-      # BACKEND OCR SCANNING
-      with st.spinner('Scanning image text in backend...'):
-        try:
-          scanned_text = pytesseract.image_to_string(image).strip()
-          if scanned_text and len(scanned_text) > 5:
-            st.session_state['extracted_document_text'] = scanned_text
-            st.success(
-                f'Successfully scanned {len(scanned_text)} characters from'
-                ' image!'
-            )
-          else:
-            st.warning(
-                'Image scanned, but very little text was detected. Please add'
-                ' details below.'
-            )
-        except Exception as e:
-          st.error(f'OCR Scan Error: {str(e)}')
   else:
-    st.session_state['extracted_document_text'] = ''
+    if not st.session_state['extracted_document_text']:
+      st.session_state['extracted_document_text'] = ''
 
-  # Editable text area to review or supplement scanned text
+  # Editable text area for active context
   manual_text = st.text_area(
-      'Scanned / Active Document Text:',
+      'Active Document / Evidence Details:',
       value=st.session_state['extracted_document_text'],
-      height=140,
+      height=150,
+      placeholder='Paste text or key details from your document here...',
   )
   if manual_text != st.session_state['extracted_document_text']:
     st.session_state['extracted_document_text'] = manual_text
@@ -107,7 +93,7 @@ for message in st.session_state['messages']:
 
 # Main Chat Input
 if prompt_input := st.chat_input(
-    'Ask what the company name is, or if it is real/fake...'
+    'Ask whether it is real or fake, company name, etc...'
 ):
   st.session_state['messages'].append(
       {'role': 'user', 'content': prompt_input}
@@ -136,7 +122,7 @@ if prompt_input := st.chat_input(
       doc_context = st.session_state.get('extracted_document_text', '')
       full_input = (
           f'System Guidelines: {system_prompt}\n\n'
-          f'Scanned Document Text Context:\n{doc_context}\n\n'
+          f'Document Text Context:\n{doc_context}\n\n'
           f'User Question: {prompt_input}'
       )
 
@@ -144,7 +130,7 @@ if prompt_input := st.chat_input(
         response = llm.invoke(full_input)
         answer = response.content
       except Exception as e:
-        answer = f'Analysis Error: {str(e)}. Please try your request again.'
+        answer = f'Analysis Error: {str(e)}. Please try again.'
 
       st.markdown(answer)
       st.session_state['messages'].append(

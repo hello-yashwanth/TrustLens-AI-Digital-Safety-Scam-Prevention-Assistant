@@ -1,5 +1,5 @@
 streamlit
-pytesseract
+numpy
 pillow
 pypdf
 langchain-classic

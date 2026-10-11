@@ -1,5 +1,4 @@
 import os
-import numpy as np
 from PIL import Image
 import streamlit as st
 from langchain_classic.chains import create_retrieval_chain
@@ -60,7 +59,8 @@ def init_rag_pipeline():
       '2. **Document / Evidence Analysis**: If an uploaded document or evidence'
       ' snippet is provided and the user asks to analyze it, structure your'
       ' response into an Evidence-Based Risk Report with prominent large headings'
-      ' and smaller bullet descriptions.\n'
+      ' and smaller bullet descriptions. Give clear assessments like "Real" or "Fake"'
+      ' when asked directly based on the evidence.\n'
       '3. **Scam Incident / Financial Fraud Reporting**: If the user reports a'
       ' suspected financial scam, online fraud, or asks what to do after being'
       ' scammed, you MUST generate a concise, structured answer in **plain text list format**'
@@ -93,126 +93,54 @@ with st.spinner(
 ):
   rag_chain = init_rag_pipeline()
 
-# Initialize session state for chat messages and document text
+# Initialize session state
 if 'messages' not in st.session_state:
   st.session_state['messages'] = [
       {
           'role': 'assistant',
           'content': (
-              'Hello! I am TrustLens AI. You can upload an image or document'
-              ' in the sidebar, or ask me how to report a scam.'
+              'Hello! I am TrustLens AI. Upload an image or document in the'
+              ' sidebar and ask me any question in the chat below!'
           ),
       }
   ]
 
-if 'doc_text' not in st.session_state:
-  st.session_state['doc_text'] = ''
+if 'uploaded_image' not in st.session_state:
+  st.session_state['uploaded_image'] = None
 
 # Sidebar: File & Image Uploader
 with st.sidebar:
   st.header('📁 Evidence Upload')
-  st.write('Upload screenshots, PDFs, or paste text to analyze.')
-
   uploaded_file = st.file_uploader(
-      'Upload Image or Document:', type=['png', 'jpg', 'jpeg', 'pdf']
+      'Upload Offer Letter or Screenshot:', type=['png', 'jpg', 'jpeg', 'pdf']
   )
 
   if uploaded_file is not None:
     if uploaded_file.type == 'application/pdf':
-      # Extract text from uploaded PDF
       import pypdf
 
       reader = pypdf.PdfReader(uploaded_file)
-      pdf_text = ''
-      for page in reader.pages:
-        pdf_text += page.extract_text() or ''
-      st.session_state['doc_text'] = pdf_text.strip()
-      st.success('PDF uploaded and text extracted successfully!')
+      pdf_text = ''.join([page.extract_text() or '' for page in reader.pages])
+      st.session_state['uploaded_image'] = pdf_text.strip()
+      st.success('PDF uploaded and indexed successfully!')
     else:
-      # Display image preview
       image = Image.open(uploaded_file)
-      st.image(image, caption='Uploaded Evidence', use_container_width=True)
-      st.info(
-          'Image uploaded! Please type out or paste the text content from the'
-          ' screenshot below so the AI can analyze it.'
-      )
-
-  # Manual text input / paste backup
-  manual_input = st.text_area(
-      'Paste or add context text:',
-      value=st.session_state['doc_text'],
-      height=120,
-  )
-  if manual_input != st.session_state['doc_text']:
-    st.session_state['doc_text'] = manual_input
-
-  if st.session_state['doc_text']:
-    with st.expander('View Active Document Memory'):
-      st.text_area(
-          'Context:',
-          value=st.session_state['doc_text'],
-          height=150,
-          disabled=True,
-      )
+      st.session_state['uploaded_image'] = image
+      st.image(image, caption='Active Evidence Image', use_container_width=True)
+      st.success('Image uploaded successfully! You can now ask questions below.')
+  else:
+    if st.button('Clear Uploaded Evidence'):
+      st.session_state['uploaded_image'] = None
+      st.rerun()
 
 # Display Chat History
 for message in st.session_state['messages']:
   with st.chat_message(message['role']):
     st.markdown(message['content'])
 
-# Clickable Question Suggestions (Rendered if document memory exists)
-if st.session_state['doc_text']:
-  st.markdown('---')
-  st.markdown('### 💡 Suggested Questions About This Document')
-  st.write(
-      'Choose a quick question to investigate the uploaded message further:'
-  )
-
-  col1, col2 = st.columns(2)
-  selected_suggestion = None
-
-  with col1:
-    if st.button('🔍 Is this job offer genuine or fake?'):
-      selected_suggestion = 'Is this job offer genuine or fake?'
-    if st.button('🚩 What are the biggest red flags?'):
-      selected_suggestion = 'What are the biggest red flags?'
-    if st.button('📄 Which exact text indicates a scam?'):
-      selected_suggestion = 'Which exact text indicates a scam?'
-
-  with col2:
-    if st.button('🏢 How can I verify the company?'):
-      selected_suggestion = 'How can I verify the company?'
-    if st.button('🛡️ What should I do next?'):
-      selected_suggestion = 'What should I do next?'
-    if st.button('📚 Which official sources support your answer?'):
-      selected_suggestion = 'Which official sources support your answer?'
-
-  if selected_suggestion:
-    st.session_state['messages'].append(
-        {'role': 'user', 'content': selected_suggestion}
-    )
-    with st.chat_message('user'):
-      st.markdown(selected_suggestion)
-
-    with st.chat_message('assistant'):
-      with st.spinner('Analyzing query...'):
-        full_input = (
-            f'Context Document / Extracted Evidence:\n'
-            f'{st.session_state["doc_text"]}\n\nUser'
-            f' Query / Question: {selected_suggestion}'
-        )
-        response = rag_chain.invoke({'input': full_input})
-        answer = response['answer']
-        st.markdown(answer)
-
-        st.session_state['messages'].append(
-            {'role': 'assistant', 'content': answer}
-        )
-        st.rerun()
-
-# Static Bottom Chat Input
+# Main Chat Input (Handles both text and context together)
 if prompt_input := st.chat_input(
-    'Ask TrustLens AI or analyze an uploaded document...'
+    'Ask whether it is real or fake, or ask anything else...'
 ):
   st.session_state['messages'].append(
       {'role': 'user', 'content': prompt_input}
@@ -221,15 +149,21 @@ if prompt_input := st.chat_input(
     st.markdown(prompt_input)
 
   with st.chat_message('assistant'):
-    with st.spinner('Thinking...'):
-      full_input = prompt_input
-      if st.session_state['doc_text']:
-        full_input = (
-            f'Context Document / Extracted Evidence:\n'
-            f'{st.session_state["doc_text"]}\n\nUser'
-            f' Query / Question: {prompt_input}'
-        )
+    with st.spinner('Analyzing...'):
+      evidence_context = ''
+      if st.session_state['uploaded_image'] is not None:
+        if isinstance(st.session_state['uploaded_image'], str):
+          evidence_context = (
+              f'Uploaded PDF Text Context:\n{st.session_state["uploaded_image"]}\n\n'
+          )
+        else:
+          # If it's an image, pass a descriptive note for RAG retrieval alongside the query
+          evidence_context = (
+              '[Note: The user has uploaded an image/screenshot of an offer'
+              ' letter or document for verification.]\n\n'
+          )
 
+      full_input = evidence_context + f'User Query: {prompt_input}'
       response = rag_chain.invoke({'input': full_input})
       answer = response['answer']
       st.markdown(answer)

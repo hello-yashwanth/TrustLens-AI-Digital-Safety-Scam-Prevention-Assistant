@@ -56,27 +56,23 @@ def init_rag_pipeline():
       'Behavior Guidelines:\n'
       '1. **General Questions / Chat**: Respond naturally, intelligently, and'
       ' conversationally as an expert.\n'
-      '2. **Document / Evidence Analysis**: If an uploaded document or evidence'
-      ' snippet is provided and the user asks to analyze it, structure your'
-      ' response into an Evidence-Based Risk Report with prominent large headings'
-      ' and smaller bullet descriptions. Give clear assessments like "Real" or "Fake"'
-      ' when asked directly based on the evidence.\n'
+      '2. **Document / Evidence Analysis**: When a user uploads an image or'
+      ' document (such as a Wipro or corporate job offer letter requiring an'
+      ' upfront fee or security deposit), analyze it thoroughly. State clearly'
+      ' whether it is a **SCAM (Fake)** or **Genuine**. Point out specific red'
+      ' flags such as requests for money/UPI transfers, training fees, or'
+      ' outdated dates.\n'
       '3. **Scam Incident / Financial Fraud Reporting**: If the user reports a'
-      ' suspected financial scam, online fraud, or asks what to do after being'
-      ' scammed, you MUST generate a concise, structured answer in **plain text list format**'
-      ' (DO NOT use tables). Use large markdown headings (###) for each of the following 6 points:\n'
+      ' suspected financial scam or fraud, provide concise, structured action'
+      ' steps using plain headings (###):\n'
       '   ### 1. Immediate Action\n'
-      '   - What to do first, especially if money has been transferred (contact bank immediately to freeze transaction).\n'
+      '   - Contact your bank immediately to block any transfers.\n'
       '   ### 2. Official Reporting Channel\n'
-      '   - The government portal (https://cybercrime.gov.in/) and helpline (Call 1930).\n'
+      '   - Visit the National Cyber Crime Portal (https://cybercrime.gov.in/) or call 1930.\n'
       '   ### 3. Evidence Checklist\n'
-      '   - Screenshots, transaction IDs, dates, sender details, and URLs.\n'
+      '   - Save screenshots, transaction IDs, and sender emails.\n'
       '   ### 4. Account Protection\n'
-      '   - Secure affected accounts, change passwords, and enable 2FA.\n'
-      '   ### 5. Source References\n'
-      '   - Official guidance links ([National Cyber Crime Reporting Portal](https://cybercrime.gov.in/)).\n'
-      '   ### 6. Tailored Follow-Up Questions\n'
-      '   - Ask whether money was lost, a link was clicked, or personal information was shared so advice can be tailored.\n\n'
+      '   - Secure passwords and enable 2FA.\n\n'
       'Retrieved Context from Official Guides:\n{context}'
   )
 
@@ -99,14 +95,15 @@ if 'messages' not in st.session_state:
       {
           'role': 'assistant',
           'content': (
-              'Hello! I am TrustLens AI. Upload an image or document in the'
-              ' sidebar and ask me any question in the chat below!'
+              'Hello! I am TrustLens AI. Upload an offer letter screenshot in'
+              ' the sidebar, and ask me whether it is real or fake in the chat'
+              ' below!'
           ),
       }
   ]
 
-if 'uploaded_image' not in st.session_state:
-  st.session_state['uploaded_image'] = None
+if 'uploaded_evidence' not in st.session_state:
+  st.session_state['uploaded_evidence'] = ''
 
 # Sidebar: File & Image Uploader
 with st.sidebar:
@@ -121,26 +118,30 @@ with st.sidebar:
 
       reader = pypdf.PdfReader(uploaded_file)
       pdf_text = ''.join([page.extract_text() or '' for page in reader.pages])
-      st.session_state['uploaded_image'] = pdf_text.strip()
-      st.success('PDF uploaded and indexed successfully!')
+      st.session_state['uploaded_evidence'] = pdf_text.strip()
+      st.success('PDF text extracted successfully!')
     else:
       image = Image.open(uploaded_file)
-      st.session_state['uploaded_image'] = image
-      st.image(image, caption='Active Evidence Image', use_container_width=True)
-      st.success('Image uploaded successfully! You can now ask questions below.')
-  else:
-    if st.button('Clear Uploaded Evidence'):
-      st.session_state['uploaded_image'] = None
-      st.rerun()
+      st.image(image, caption='Uploaded Evidence', use_container_width=True)
+      st.success('Image loaded successfully!')
+
+  # Text helper box so users can easily paste the text if the image text needs highlighting
+  extracted_helper = st.text_area(
+      'Or paste text/details from the image here:',
+      value=st.session_state['uploaded_evidence'],
+      height=100,
+  )
+  if extracted_helper != st.session_state['uploaded_evidence']:
+    st.session_state['uploaded_evidence'] = extracted_helper
 
 # Display Chat History
 for message in st.session_state['messages']:
   with st.chat_message(message['role']):
     st.markdown(message['content'])
 
-# Main Chat Input (Handles both text and context together)
+# Main Chat Input
 if prompt_input := st.chat_input(
-    'Ask whether it is real or fake, or ask anything else...'
+    'Ask whether it is real or fake, company name, etc...'
 ):
   st.session_state['messages'].append(
       {'role': 'user', 'content': prompt_input}
@@ -149,21 +150,22 @@ if prompt_input := st.chat_input(
     st.markdown(prompt_input)
 
   with st.chat_message('assistant'):
-    with st.spinner('Analyzing...'):
+    with st.spinner('Analyzing evidence...'):
       evidence_context = ''
-      if st.session_state['uploaded_image'] is not None:
-        if isinstance(st.session_state['uploaded_image'], str):
-          evidence_context = (
-              f'Uploaded PDF Text Context:\n{st.session_state["uploaded_image"]}\n\n'
-          )
-        else:
-          # If it's an image, pass a descriptive note for RAG retrieval alongside the query
-          evidence_context = (
-              '[Note: The user has uploaded an image/screenshot of an offer'
-              ' letter or document for verification.]\n\n'
-          )
+      if st.session_state['uploaded_evidence']:
+        evidence_context = (
+            f'Uploaded Document/Image Text Content Context:\n'
+            f'{st.session_state["uploaded_evidence"]}\n\n'
+        )
 
-      full_input = evidence_context + f'User Query: {prompt_input}'
+      full_input = (
+          f'{evidence_context}User Question: {prompt_input}. (If the user asks'
+          ' if the offer letter is real or fake, analyze the uploaded text'
+          ' context carefully. Look for red flags like training fees, security'
+          ' deposits, UPI deposit requirements, and mismatched company domains'
+          ' to give a definitive verdict.)'
+      )
+
       response = rag_chain.invoke({'input': full_input})
       answer = response['answer']
       st.markdown(answer)

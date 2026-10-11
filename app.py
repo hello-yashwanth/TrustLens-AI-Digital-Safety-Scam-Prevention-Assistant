@@ -24,11 +24,11 @@ st.write(
 )
 
 
-# 2. Initialize Groq Model
+# 2. Initialize Groq Model (Using active Qwen vision model)
 @st.cache_resource
 def init_groq_llm():
   return ChatGroq(
-      model='llama-3.2-11b-vision-preview',
+      model='qwen/qwen3.8-27b',
       temperature=0,
       groq_api_key=st.secrets['GROQ_API_KEY'],
   )
@@ -72,14 +72,13 @@ with st.sidebar:
           image, caption='Active Uploaded Evidence Image', use_container_width=True
       )
 
-      # Convert image to bytes to send directly to Groq Vision API
       bytes_data = uploaded_file.getvalue()
       base64_img = base64.b64encode(bytes_data).decode('utf-8')
       st.session_state['extracted_document_text'] = {
           'type': 'image_url',
           'image_url': {'url': f'data:image/jpeg;base64,{base64_img}'},
       }
-      st.success('Image successfully loaded into AI Vision memory!')
+      st.success('Image loaded into AI memory!')
   else:
     st.session_state['extracted_document_text'] = ''
 
@@ -96,19 +95,18 @@ if prompt_input := st.chat_input('Ask if this offer letter is real or fake...'):
   with st.chat_message('user'):
     st.markdown(prompt_input)
 
-  with st.assistant if hasattr(st, 'assistant') else st.chat_message('assistant'):
-    with st.spinner('TrustLens AI Vision is analyzing your document...'):
+  with st.chat_message('assistant'):
+    with st.spinner('TrustLens AI is analyzing your document...'):
       system_prompt = (
           'You are TrustLens AI, an expert cybersecurity and digital safety'
           ' assistant. Your goal is to help users spot scams, phishing, and'
           ' fake job offers.\n'
-          'When an image or document is provided, you MUST analyze its visual'
-          ' contents directly. Identify the company name (such as DP World,'
-          ' Wipro, or Indigo), check for scam warning signs (such as requests'
-          ' for upfront security deposits, registration fees, training charges,'
-          ' or unofficial domains), and give a clear definitive verdict of'
-          ' **SCAM (Fake)** or **Genuine** with clear bullet points explaining'
-          ' your reasoning.'
+          'When an image or document is provided, analyze it. Identify the'
+          ' company name (such as DP World, Wipro, or Indigo), check for scam'
+          ' warning signs (such as requests for upfront security deposits,'
+          ' registration fees, training charges, or unofficial domains), and'
+          ' give a clear definitive verdict of **SCAM (Fake)** or **Genuine**'
+          ' with bullet points explaining your reasoning.'
       )
 
       content_blocks = [{
@@ -116,7 +114,6 @@ if prompt_input := st.chat_input('Ask if this offer letter is real or fake...'):
           'text': f'{system_prompt}\n\nUser Question: {prompt_input}',
       }]
 
-      # Attach the image block if present
       doc_content = st.session_state.get('extracted_document_text')
       if doc_content:
         if isinstance(doc_content, dict):
@@ -131,10 +128,8 @@ if prompt_input := st.chat_input('Ask if this offer letter is real or fake...'):
         response = llm.invoke([message])
         answer = response.content
       except Exception as e:
-        # Fallback if vision payload errors out
         answer = (
-            f'Analysis Error: {str(e)}. Please make sure your image file is a'
-            ' clear PNG or JPG.'
+            f'Analysis Error: {str(e)}. Please try re-uploading your image file.'
         )
 
       st.markdown(answer)

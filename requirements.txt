@@ -1,0 +1,11 @@
+streamlit
+easyocr
+torch
+numpy
+pillow
+langchain-classic
+langchain-community
+langchain-core
+langchain-groq
+langchain-huggingface
+faiss-cpu

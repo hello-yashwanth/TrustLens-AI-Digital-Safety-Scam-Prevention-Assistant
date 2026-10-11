@@ -1,10 +1,9 @@
-import base64
 import os
 from PIL import Image
 import streamlit as st
 from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader
 from langchain_community.vectorstores import FAISS
-from langchain_core.messages import HumanMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -24,11 +23,11 @@ st.write(
 )
 
 
-# 2. Initialize Groq Model (Using active Qwen vision model)
+# 2. Initialize Groq Flagship Model (Active & Stable)
 @st.cache_resource
 def init_groq_llm():
   return ChatGroq(
-      model='qwen/qwen3.8-27b',
+      model='openai/gpt-oss-120b',
       temperature=0,
       groq_api_key=st.secrets['GROQ_API_KEY'],
   )
@@ -42,8 +41,8 @@ if 'messages' not in st.session_state:
       {
           'role': 'assistant',
           'content': (
-              'Hello! I am TrustLens AI. Upload your offer letter or'
-              ' screenshot in the sidebar, and ask me if it is real or fake!'
+              'Hello! I am TrustLens AI. Upload your offer letter screenshot or'
+              ' PDF in the sidebar, and ask me if it is real or fake!'
           ),
       }
   ]
@@ -64,23 +63,38 @@ with st.sidebar:
 
       reader = pypdf.PdfReader(uploaded_file)
       pdf_text = ''.join([page.extract_text() or '' for page in reader.pages])
-      st.session_state['extracted_document_text'] = pdf_text
+      st.session_state['extracted_document_text'] = pdf_text.strip()
       st.success('PDF text loaded successfully!')
     else:
       image = Image.open(uploaded_file)
       st.image(
           image, caption='Active Uploaded Evidence Image', use_container_width=True
       )
+      st.success(
+          'Image uploaded! If needed, you can also paste any specific text'
+          ' below.'
+      )
 
-      bytes_data = uploaded_file.getvalue()
-      base64_img = base64.b64encode(bytes_data).decode('utf-8')
-      st.session_state['extracted_document_text'] = {
-          'type': 'image_url',
-          'image_url': {'url': f'data:image/jpeg;base64,{base64_img}'},
-      }
-      st.success('Image loaded into AI memory!')
-  else:
-    st.session_state['extracted_document_text'] = ''
+  # Manual text box backup so you can always type/paste text if required
+  manual_text = st.text_area(
+      'Document Text / Key Details:',
+      value=st.session_state['extracted_document_text'],
+      height=120,
+      placeholder=(
+          'Paste text here if your image contains text to double-check...'
+      ),
+  )
+  if manual_text != st.session_state['extracted_document_text']:
+    st.session_state['extracted_document_text'] = manual_text
+
+  if st.session_state['extracted_document_text']:
+    with st.expander('View Active Document Memory'):
+      st.text_area(
+          'Active Context:',
+          value=st.session_state['extracted_document_text'],
+          height=150,
+          disabled=True,
+      )
 
 # Display Chat History
 for message in st.session_state['messages']:
@@ -88,7 +102,9 @@ for message in st.session_state['messages']:
     st.markdown(message['content'])
 
 # Main Chat Input
-if prompt_input := st.chat_input('Ask if this offer letter is real or fake...'):
+if prompt_input := st.chat_input(
+    'Ask what the company name is, or if it is real/fake...'
+):
   st.session_state['messages'].append(
       {'role': 'user', 'content': prompt_input}
   )
@@ -96,41 +112,35 @@ if prompt_input := st.chat_input('Ask if this offer letter is real or fake...'):
     st.markdown(prompt_input)
 
   with st.chat_message('assistant'):
-    with st.spinner('TrustLens AI is analyzing your document...'):
+    with st.spinner('TrustLens AI is analyzing your request...'):
       system_prompt = (
           'You are TrustLens AI, an expert cybersecurity and digital safety'
           ' assistant. Your goal is to help users spot scams, phishing, and'
           ' fake job offers.\n'
-          'When an image or document is provided, analyze it. Identify the'
-          ' company name (such as DP World, Wipro, or Indigo), check for scam'
-          ' warning signs (such as requests for upfront security deposits,'
-          ' registration fees, training charges, or unofficial domains), and'
-          ' give a clear definitive verdict of **SCAM (Fake)** or **Genuine**'
-          ' with bullet points explaining your reasoning.'
+          'When document context is provided, analyze it thoroughly. Identify'
+          ' the company name (such as DP World, Wipro, or Indigo), check for'
+          ' scam warning signs (such as requests for upfront security'
+          ' deposits, registration fees, training charges, or unofficial'
+          ' domains), and give a clear definitive verdict of **SCAM (Fake)**'
+          ' or **Genuine** with clear bullet points explaining your'
+          ' reasoning.\n'
+          'If the user asks what to do if scammed, provide structured action'
+          ' steps, reference the official cybercrime portal'
+          ' (https://cybercrime.gov.in/), and helpline 1930.'
       )
 
-      content_blocks = [{
-          'type': 'text',
-          'text': f'{system_prompt}\n\nUser Question: {prompt_input}',
-      }]
-
-      doc_content = st.session_state.get('extracted_document_text')
-      if doc_content:
-        if isinstance(doc_content, dict):
-          content_blocks.append(doc_content)
-        else:
-          content_blocks[0]['text'] += (
-              f'\n\nDocument Text Context:\n{doc_content}'
-          )
+      doc_context = st.session_state.get('extracted_document_text', '')
+      full_input = (
+          f'System Guidelines: {system_prompt}\n\n'
+          f'Active Document Context / Uploaded Details:\n{doc_context}\n\n'
+          f'User Question: {prompt_input}'
+      )
 
       try:
-        message = HumanMessage(content=content_blocks)
-        response = llm.invoke([message])
+        response = llm.invoke(full_input)
         answer = response.content
       except Exception as e:
-        answer = (
-            f'Analysis Error: {str(e)}. Please try re-uploading your image file.'
-        )
+        answer = f'Analysis Error: {str(e)}. Please try your request again.'
 
       st.markdown(answer)
       st.session_state['messages'].append(

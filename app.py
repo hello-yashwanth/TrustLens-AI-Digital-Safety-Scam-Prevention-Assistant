@@ -29,13 +29,10 @@ st.write(
 )
 
 
-# 2. Initialize EasyOCR Reader (Cached)
+# 2. Lazy-Load EasyOCR Reader (Only downloads/initializes when an image is uploaded)
 @st.cache_resource
 def load_ocr_reader():
-  return easyocr.Reader(['en'])
-
-
-reader = load_ocr_reader()
+  return easyocr.Reader(['en'], gpu=False)
 
 
 # Helper function to check OCR text quality
@@ -49,7 +46,7 @@ def validate_ocr_quality(text):
   return True, 'OK'
 
 
-# 3. Load RAG Pipeline with Multi-Mode System Prompt
+# 3. Load RAG Pipeline (Cached)
 @st.cache_resource
 def init_rag_pipeline():
   loader = DirectoryLoader('./data', glob='./*.pdf', loader_cls=PyPDFLoader)
@@ -65,10 +62,10 @@ def init_rag_pipeline():
   retriever = vector_store.as_retriever(search_kwargs={'k': 3})
 
   llm = ChatGroq(
-    model="openai/gpt-oss-120b",
-    temperature=0,
-    groq_api_key=st.secrets["GROQ_API_KEY"],
-)
+      model='openai/gpt-oss-120b',
+      temperature=0,
+      groq_api_key=st.secrets['GROQ_API_KEY'],
+  )
 
   system_prompt = (
       'You are TrustLens AI, an expert cybersecurity and digital safety'
@@ -109,7 +106,9 @@ def init_rag_pipeline():
   return create_retrieval_chain(retriever, question_answer_chain)
 
 
-with st.spinner('Loading knowledge base and indexing PDFs... Please wait.'):
+with st.spinner(
+    'Loading RAG knowledge base and indexing PDFs... Please wait.'
+):
   rag_chain = init_rag_pipeline()
 
 # Initialize session state for chat messages and document text
@@ -140,7 +139,8 @@ with st.sidebar:
     image = Image.open(uploaded_file)
     st.image(image, caption='Uploaded Evidence', use_container_width=True)
 
-    with st.spinner('Extracting text via EasyOCR...'):
+    with st.spinner('Loading OCR engine and extracting text...'):
+      reader = load_ocr_reader()  # Loaded on demand here instead of startup
       image_np = np.array(image)
       results = reader.readtext(image_np, detail=0)
       extracted_text = ' '.join(results).strip()
@@ -195,7 +195,6 @@ if st.session_state['doc_text']:
     if st.button('📚 Which official sources support your answer?'):
       selected_suggestion = 'Which official sources support your answer?'
 
-  # If a suggestion button was clicked, process it as a user message automatically
   if selected_suggestion:
     st.session_state['messages'].append(
         {'role': 'user', 'content': selected_suggestion}
@@ -219,7 +218,7 @@ if st.session_state['doc_text']:
         )
         st.rerun()
 
-# Static Bottom Chat Input (ChatGPT / Gemini style)
+# Static Bottom Chat Input
 if prompt_input := st.chat_input(
     'Ask TrustLens AI or analyze an uploaded document...'
 ):

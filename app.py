@@ -28,12 +28,6 @@ st.write(
 )
 
 
-# Helper to convert uploaded image to base64 for vision processing
-def image_to_base64(uploaded_file):
-  bytes_data = uploaded_file.getvalue()
-  return base64.b64encode(bytes_data).decode('utf-8')
-
-
 # 2. Load RAG Pipeline (Cached)
 @st.cache_resource
 def init_rag_pipeline():
@@ -63,11 +57,11 @@ def init_rag_pipeline():
       'Behavior Guidelines:\n'
       '1. **General Questions / Chat**: Respond naturally, intelligently, and'
       ' conversationally as an expert.\n'
-      '2. **Document / Evidence Analysis**: When an image or document is'
-      ' uploaded, analyze its text and contents thoroughly. Identify the'
-      ' company name (e.g., Wipro Technologies), check for scam indicators like'
-      ' upfront fee deposits, training charges, or UPI transfers, and give a'
-      ' clear definitive verdict of **SCAM (Fake)** or **Genuine**.\n'
+      '2. **Document / Evidence Analysis**: When a user uploads a new image or'
+      ' document, analyze it dynamically based on the current file name and'
+      ' details provided. Identify the company (e.g., Indigo Airlines /'
+      ' InterGlobe Aviation), check for red flags, and provide a clear'
+      ' verdict of **SCAM (Fake)** or **Genuine**.\n'
       '3. **Scam Incident Reporting**: Provide concise structured steps using'
       ' plain markdown headings (###) for immediate actions, cybercrime portal'
       ' (https://cybercrime.gov.in/), and helpline (1930).\n\n'
@@ -93,14 +87,14 @@ if 'messages' not in st.session_state:
       {
           'role': 'assistant',
           'content': (
-              'Hello! I am TrustLens AI. Upload your screenshot in the sidebar'
-              ' and ask me anything in the chat below!'
+              'Hello! I am TrustLens AI. Upload your offer letter or'
+              ' screenshot in the sidebar, and ask me anything below!'
           ),
       }
   ]
 
-if 'uploaded_img_bytes' not in st.session_state:
-  st.session_state['uploaded_img_bytes'] = None
+if 'current_file_name' not in st.session_state:
+  st.session_state['current_file_name'] = None
 
 # Sidebar: File & Image Uploader
 with st.sidebar:
@@ -110,18 +104,26 @@ with st.sidebar:
   )
 
   if uploaded_file is not None:
+    # Check if the user uploaded a new file
+    if st.session_state['current_file_name'] != uploaded_file.name:
+      st.session_state['current_file_name'] = uploaded_file.name
+      st.success(f'Loaded new file: {uploaded_file.name}')
+
     if uploaded_file.type == 'application/pdf':
       import pypdf
 
       reader = pypdf.PdfReader(uploaded_file)
       pdf_text = ''.join([page.extract_text() or '' for page in reader.pages])
-      st.session_state['uploaded_img_bytes'] = pdf_text
-      st.success('PDF uploaded and text loaded successfully!')
+      st.session_state['file_content_context'] = pdf_text
     else:
       image = Image.open(uploaded_file)
-      st.session_state['uploaded_img_bytes'] = uploaded_file.getvalue()
       st.image(image, caption='Active Uploaded Evidence', use_container_width=True)
-      st.success('Image recognized and linked to chat!')
+      st.session_state['file_content_context'] = (
+          f'User uploaded image file named: {uploaded_file.name}.'
+      )
+  else:
+    st.session_state['current_file_name'] = None
+    st.session_state['file_content_context'] = None
 
 # Display Chat History
 for message in st.session_state['messages']:
@@ -129,9 +131,7 @@ for message in st.session_state['messages']:
     st.markdown(message['content'])
 
 # Main Chat Input
-if prompt_input := st.chat_input(
-    'Ask what the company name is, or if it is real/fake...'
-):
+if prompt_input := st.chat_input('Ask about the newly uploaded document...'):
   st.session_state['messages'].append(
       {'role': 'user', 'content': prompt_input}
   )
@@ -139,29 +139,22 @@ if prompt_input := st.chat_input(
     st.markdown(prompt_input)
 
   with st.chat_message('assistant'):
-    with st.spinner('Analyzing your upload...'):
+    with st.spinner('Analyzing current evidence...'):
       evidence_context = ''
-      if st.session_state['uploaded_img_bytes'] is not None:
-        if isinstance(st.session_state['uploaded_img_bytes'], str):
-          evidence_context = (
-              f'Extracted Text from Uploaded PDF Document:\n'
-              f'{st.session_state["uploaded_img_bytes"]}\n\n'
-          )
-        else:
-          # Extract readable text clues from the image name / standard keywords if uploaded
-          evidence_context = (
-              '[Evidence Image Attached by User: The user has uploaded an image'
-              ' of an email/offer letter showing a corporate logo like Wipro'
-              ' Technologies, mentioning candidate shortlisting, interview'
-              ' dates in Jan 2018, and a payment process requiring an upfront'
-              ' deposit fee of INR 5040/-].\n\n'
-          )
+      if st.session_state.get('file_content_context'):
+        evidence_context = (
+            f'[Currently Active Uploaded Evidence File Name:'
+            f' {st.session_state["current_file_name"]}]\n'
+            f'{st.session_state["file_content_context"]}\n\n'
+        )
+      else:
+        evidence_context = '[No active evidence file currently uploaded.]\n\n'
 
       full_input = (
-          f'{evidence_context}User Question: {prompt_input}. (Examine the'
-          ' attached evidence context above. Directly answer the company'
-          ' name and whether it is a SCAM or Genuine based on the fee'
-          ' requirements and details present.)'
+          f'{evidence_context}User Question: {prompt_input}. (Analyze the'
+          ' newly active evidence file name and contents above. Do NOT use or'
+          ' reference previous old uploads. Answer accurately based solely on'
+          ' the currently active file.)'
       )
 
       response = rag_chain.invoke({'input': full_input})

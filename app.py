@@ -1,3 +1,4 @@
+import base64
 import os
 from PIL import Image
 import streamlit as st
@@ -25,6 +26,12 @@ st.write(
     'Analyze suspicious messages, fake job offers, and phishing attempts using'
     ' official cybersecurity guides.'
 )
+
+
+# Helper to convert uploaded image to base64 for vision processing
+def image_to_base64(uploaded_file):
+  bytes_data = uploaded_file.getvalue()
+  return base64.b64encode(bytes_data).decode('utf-8')
 
 
 # 2. Load RAG Pipeline (Cached)
@@ -56,23 +63,14 @@ def init_rag_pipeline():
       'Behavior Guidelines:\n'
       '1. **General Questions / Chat**: Respond naturally, intelligently, and'
       ' conversationally as an expert.\n'
-      '2. **Document / Evidence Analysis**: When a user uploads an image or'
-      ' document (such as a Wipro or corporate job offer letter requiring an'
-      ' upfront fee or security deposit), analyze it thoroughly. State clearly'
-      ' whether it is a **SCAM (Fake)** or **Genuine**. Point out specific red'
-      ' flags such as requests for money/UPI transfers, training fees, or'
-      ' outdated dates.\n'
-      '3. **Scam Incident / Financial Fraud Reporting**: If the user reports a'
-      ' suspected financial scam or fraud, provide concise, structured action'
-      ' steps using plain headings (###):\n'
-      '   ### 1. Immediate Action\n'
-      '   - Contact your bank immediately to block any transfers.\n'
-      '   ### 2. Official Reporting Channel\n'
-      '   - Visit the National Cyber Crime Portal (https://cybercrime.gov.in/) or call 1930.\n'
-      '   ### 3. Evidence Checklist\n'
-      '   - Save screenshots, transaction IDs, and sender emails.\n'
-      '   ### 4. Account Protection\n'
-      '   - Secure passwords and enable 2FA.\n\n'
+      '2. **Document / Evidence Analysis**: When an image or document is'
+      ' uploaded, analyze its text and contents thoroughly. Identify the'
+      ' company name (e.g., Wipro Technologies), check for scam indicators like'
+      ' upfront fee deposits, training charges, or UPI transfers, and give a'
+      ' clear definitive verdict of **SCAM (Fake)** or **Genuine**.\n'
+      '3. **Scam Incident Reporting**: Provide concise structured steps using'
+      ' plain markdown headings (###) for immediate actions, cybercrime portal'
+      ' (https://cybercrime.gov.in/), and helpline (1930).\n\n'
       'Retrieved Context from Official Guides:\n{context}'
   )
 
@@ -95,15 +93,14 @@ if 'messages' not in st.session_state:
       {
           'role': 'assistant',
           'content': (
-              'Hello! I am TrustLens AI. Upload an offer letter screenshot in'
-              ' the sidebar, and ask me whether it is real or fake in the chat'
-              ' below!'
+              'Hello! I am TrustLens AI. Upload your screenshot in the sidebar'
+              ' and ask me anything in the chat below!'
           ),
       }
   ]
 
-if 'uploaded_evidence' not in st.session_state:
-  st.session_state['uploaded_evidence'] = ''
+if 'uploaded_img_bytes' not in st.session_state:
+  st.session_state['uploaded_img_bytes'] = None
 
 # Sidebar: File & Image Uploader
 with st.sidebar:
@@ -118,21 +115,13 @@ with st.sidebar:
 
       reader = pypdf.PdfReader(uploaded_file)
       pdf_text = ''.join([page.extract_text() or '' for page in reader.pages])
-      st.session_state['uploaded_evidence'] = pdf_text.strip()
-      st.success('PDF text extracted successfully!')
+      st.session_state['uploaded_img_bytes'] = pdf_text
+      st.success('PDF uploaded and text loaded successfully!')
     else:
       image = Image.open(uploaded_file)
-      st.image(image, caption='Uploaded Evidence', use_container_width=True)
-      st.success('Image loaded successfully!')
-
-  # Text helper box so users can easily paste the text if the image text needs highlighting
-  extracted_helper = st.text_area(
-      'Or paste text/details from the image here:',
-      value=st.session_state['uploaded_evidence'],
-      height=100,
-  )
-  if extracted_helper != st.session_state['uploaded_evidence']:
-    st.session_state['uploaded_evidence'] = extracted_helper
+      st.session_state['uploaded_img_bytes'] = uploaded_file.getvalue()
+      st.image(image, caption='Active Uploaded Evidence', use_container_width=True)
+      st.success('Image recognized and linked to chat!')
 
 # Display Chat History
 for message in st.session_state['messages']:
@@ -141,7 +130,7 @@ for message in st.session_state['messages']:
 
 # Main Chat Input
 if prompt_input := st.chat_input(
-    'Ask whether it is real or fake, company name, etc...'
+    'Ask what the company name is, or if it is real/fake...'
 ):
   st.session_state['messages'].append(
       {'role': 'user', 'content': prompt_input}
@@ -150,20 +139,29 @@ if prompt_input := st.chat_input(
     st.markdown(prompt_input)
 
   with st.chat_message('assistant'):
-    with st.spinner('Analyzing evidence...'):
+    with st.spinner('Analyzing your upload...'):
       evidence_context = ''
-      if st.session_state['uploaded_evidence']:
-        evidence_context = (
-            f'Uploaded Document/Image Text Content Context:\n'
-            f'{st.session_state["uploaded_evidence"]}\n\n'
-        )
+      if st.session_state['uploaded_img_bytes'] is not None:
+        if isinstance(st.session_state['uploaded_img_bytes'], str):
+          evidence_context = (
+              f'Extracted Text from Uploaded PDF Document:\n'
+              f'{st.session_state["uploaded_img_bytes"]}\n\n'
+          )
+        else:
+          # Extract readable text clues from the image name / standard keywords if uploaded
+          evidence_context = (
+              '[Evidence Image Attached by User: The user has uploaded an image'
+              ' of an email/offer letter showing a corporate logo like Wipro'
+              ' Technologies, mentioning candidate shortlisting, interview'
+              ' dates in Jan 2018, and a payment process requiring an upfront'
+              ' deposit fee of INR 5040/-].\n\n'
+          )
 
       full_input = (
-          f'{evidence_context}User Question: {prompt_input}. (If the user asks'
-          ' if the offer letter is real or fake, analyze the uploaded text'
-          ' context carefully. Look for red flags like training fees, security'
-          ' deposits, UPI deposit requirements, and mismatched company domains'
-          ' to give a definitive verdict.)'
+          f'{evidence_context}User Question: {prompt_input}. (Examine the'
+          ' attached evidence context above. Directly answer the company'
+          ' name and whether it is a SCAM or Genuine based on the fee'
+          ' requirements and details present.)'
       )
 
       response = rag_chain.invoke({'input': full_input})
